@@ -11,5 +11,5 @@ Operations Lab environment.
 | ID | Title | Severity | System | Date |
 |---|---|---|---|---|
 | SCA-001 | Insufficient Windows Password Policy Configuration | High | windows-breakfix | 2026-06-01 |
-
+| SCA-002 | Insufficient Windows Audit Policy Configuration | Medium | windows-breakfix | 2026-06-01 |
 ---
