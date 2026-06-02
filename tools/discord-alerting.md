@@ -16,8 +16,6 @@ Wazuh alerts.json → discord-alert.sh → Discord Webhook → #wazuh-alerts cha
 
 ---
 
----
-
 ## Implementation
 
 A bash script runs as a systemd service on the Wazuh VM, tailing the Wazuh
