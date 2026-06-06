@@ -23,7 +23,7 @@ endpoints.
 | **Wazuh Indexer**   | OpenSearch database that stores all events and makes them searchable                               |
 | **Wazuh Dashboard** | Web UI for viewing alerts, dashboards, and investigation tools                                     |
 
-## **Data Flow:** `Endpoints → Agents → Manager → Indexer → Dashboard`
+**Data Flow:** `Endpoints → Agents → Manager → Indexer → Dashboard → Discord`
 
 ---
 
@@ -58,7 +58,7 @@ endpoints.
 | 003      | pve              | Debian (Proxmox VE) | 192.168.88.244 | ✅ Active |
 | 004      | pihole           | Ubuntu 24.04 LTS    | 192.168.88.250 | ✅ Active |
 
-> **Note:** The Proxmox host agent (003) re-registered under its system hostname `pve` following a manager reset on 2026-06-02.
+> **Note:** Agent 003 re-registered under its system hostname `pve` following a manager reset on 2026-06-02.
 
 ---
 
@@ -78,13 +78,33 @@ endpoints.
 
 ## Key Configuration Files
 
-| File                  | Location                                                          | Purpose                    |
-| --------------------- | ----------------------------------------------------------------- | -------------------------- |
-| Docker Compose        | ~/wazuh-docker/single-node/docker-compose.yml                     | Stack definition           |
-| Manager Config        | ~/wazuh-docker/single-node/config/wazuh_cluster/wazuh_manager.conf | Manager ossec.conf (bind mount) |
-| Agent Config          | /var/ossec/etc/ossec.conf                                         | Per-agent configuration    |
-| Manager Rules         | /var/ossec/ruleset/rules/                                         | Detection rule definitions |
-| Alerts Log (host)     | /var/lib/docker/volumes/single-node_wazuh_logs/_data/alerts/alerts.json | Raw alert output    |
+| File              | Location                                                                 | Purpose                         |
+| ----------------- | ------------------------------------------------------------------------ | ------------------------------- |
+| Docker Compose    | ~/wazuh-docker/single-node/docker-compose.yml                            | Stack definition                |
+| Manager Config    | ~/wazuh-docker/single-node/config/wazuh_cluster/wazuh_manager.conf      | Manager ossec.conf (bind mount) |
+| Agent Config      | /var/ossec/etc/ossec.conf                                                | Per-agent configuration         |
+| Manager Rules     | /var/ossec/ruleset/rules/                                                | Detection rule definitions      |
+| Alerts Log (host) | /var/lib/docker/volumes/single-node_wazuh_logs/_data/alerts/alerts.json | Raw alert output                |
+
+---
+
+## FIM Exclusions
+
+The following paths are excluded from File Integrity Monitoring to reduce
+noise from high-frequency system writes. All exclusions are documented with
+justification — see [detection-tuning.md](../docs/detection-tuning.md) for
+the full policy.
+
+| Path | Agent | Reason |
+| ---- | ----- | ------ |
+| `/etc/pve` | pve | Entire Proxmox cluster state directory — RRD metrics, auth keys, cluster logs update constantly |
+| `/etc/pihole/pihole-FTL.db` | pihole | SQLite query database, updated on every DNS query |
+| `/etc/pihole/pihole-FTL.db-wal` | pihole | SQLite WAL journal file |
+| `/etc/pihole/pihole-FTL.db-shm` | pihole | SQLite shared memory file |
+| `/etc/pihole/versions` | pihole | Version tracking file, updated nightly by auto-upgrade |
+| `/etc/resolv.conf` | all | Rewritten by systemd-resolved and DHCP regularly |
+| `/etc/apt/apt.conf.d` | all | APT configuration directory, modified during package upgrades |
+| `/usr/bin` | all | Binary directory, updated during package upgrades |
 
 ---
 
@@ -110,17 +130,15 @@ endpoints.
 
 **Root Cause:** Corrupted or stale `.db` files in the wazuh_queue volume combined
 with a malformed `ossec.conf` bind mount prevent wazuh-db from initializing its
-socket, causing all dependent daemons (wazuh-authd, wazuh-remoted) to fail.
+socket, causing all dependent daemons to fail.
 
 **Resolution — Full Stack Reset:**
 
 ```bash
 cd ~/wazuh-docker/single-node
 
-# Stop the stack
 docker compose down
 
-# Remove all Wazuh volumes
 docker volume rm \
   single-node_wazuh_etc \
   single-node_wazuh_var \
@@ -138,27 +156,19 @@ docker volume rm \
   single-node_wazuh-dashboard-config \
   single-node_wazuh-dashboard-custom
 
-# Reset config files to stock
 git checkout -- .
 
-# Bring stack back up (takes 2-3 minutes to fully initialize)
 docker compose up -d
 docker compose logs -f wazuh.manager
 ```
 
-**Post-Reset:** Agents automatically re-enroll using their existing keys within
-1-2 minutes. No changes required on agent machines. Agent IDs may be
-reassigned during re-enrollment.
+**Post-Reset:** Agents automatically re-enroll within 1-2 minutes. Agent IDs
+may be reassigned during re-enrollment.
 
 **Verify fix:**
 ```bash
-# wdb socket should exist
 docker compose exec wazuh.manager ls -la /var/ossec/queue/db/
-
-# API should respond
 curl -k -u admin:SecretPassword https://localhost:55000/ 2>/dev/null | python3 -m json.tool
-
-# All agents should show Active
 docker compose exec wazuh.manager /var/ossec/bin/agent_control -l
 ```
 
@@ -168,8 +178,8 @@ docker compose exec wazuh.manager /var/ossec/bin/agent_control -l
 
 | ID | Title | Date |
 | -- | ----- | ---- |
-| [SCA-001](https://github.com/AnthonyCiresi/Security-Operations-Lab/blob/main/findings/SCA-001-windows-password-policy.md) | Insufficient Windows Password Policy Configuration | 2026-06-01 |
-| [SCA-002](https://github.com/AnthonyCiresi/Security-Operations-Lab/blob/main/findings/SCA-002-windows-audit-policy.md) | Insufficient Windows Audit Policy Configuration | 2026-06-01 |
+| [SCA-001](../findings/SCA-001-windows-password-policy.md) | Insufficient Windows Password Policy Configuration | 2026-06-01 |
+| [SCA-002](../findings/SCA-002-windows-audit-policy.md) | Insufficient Windows Audit Policy Configuration | 2026-06-01 |
 
 ---
 
